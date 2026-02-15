@@ -17,6 +17,8 @@ async def lifespan(app: FastAPI):
         logger.warning(
             "Veritabanına bağlanılamadı (DATABASE_URL kontrol edin): %s", e
         )
+    except Exception as e:
+        logger.warning("Veritabanı başlatılamadı: %s", e)
     yield
 
 

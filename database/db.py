@@ -1,7 +1,10 @@
+import logging
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 from config.settings import DATABASE_URL
+
+logger = logging.getLogger(__name__)
 
 engine = create_engine(
     DATABASE_URL,
@@ -24,6 +27,9 @@ def get_db():
 
 
 def init_db():
-    """Tüm tabloları oluşturur."""
-    from admin import models  # noqa: F401
-    Base.metadata.create_all(bind=engine)
+    """Tüm tabloları oluşturur. Bağlantı yoksa sessizce atlar (Railway'de DATABASE_URL sonradan eklenebilir)."""
+    try:
+        from admin import models  # noqa: F401
+        Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        logger.warning("init_db atlandi (veritabani ulasilir degil): %s", e)
