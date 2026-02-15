@@ -3,10 +3,8 @@
 
 [build]
 builder = "nixpacks"
-# Sadece Chromium dependency'leri (hepsini kurma)
-buildCommand = "pip install -r requirements.txt && playwright install chromium && playwright install-deps chromium"
-# Yukarısı hata verirse playwright install-deps yerine şunu kullan:
-# buildCommand = "pip install -r requirements.txt && playwright install chromium && apt-get update && apt-get install -y libnss3 libatk-bridge2.0-0 libdrm2 libxkbcommon0 libgbm1 libasound2t64 libxshmfence1"
+# playwright install-deps chromium Ubuntu Noble'da libasound2 hatası veriyor; apt-get ile Chromium kütüphaneleri
+buildCommand = "pip install -r requirements.txt && playwright install chromium && apt-get update && apt-get install -y libnss3 libatk-bridge2.0-0 libdrm2 libxkbcommon0 libgbm1 libasound2t64 libxshmfence1"
 
 [deploy]
 startCommand = "uvicorn admin.app:app --host 0.0.0.0 --port $PORT"
