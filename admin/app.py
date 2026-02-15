@@ -1,13 +1,22 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from sqlalchemy.exc import OperationalError
 
 from database.db import init_db
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()
+    try:
+        init_db()
+    except OperationalError as e:
+        logger.warning(
+            "Veritabanına bağlanılamadı (DATABASE_URL kontrol edin): %s", e
+        )
     yield
 
 
@@ -16,7 +25,13 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/")
 def root():
-    return {"message": "Bot çalışıyor"}
+    return {"message": "Bot çalışıyor", "status": "ok"}
+
+
+@app.get("/health")
+def health():
+    """Railway / load balancer health check."""
+    return {"status": "ok"}
 
 
 if __name__ == "__main__":
