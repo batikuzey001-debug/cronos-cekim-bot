@@ -1,0 +1,15 @@
+# Railway build'de dahil etme ( .gitignore ile aynı mantık )
+.env
+.venv
+venv
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.git/
+.idea/
+.vscode/
+*.md
+terminals/
+.cursor/
