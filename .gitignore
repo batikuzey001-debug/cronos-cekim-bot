@@ -1,9 +1,19 @@
 # Environment
 .env
 auth_session.json
+session_data.json
 .venv
 venv
 env/
+
+# Chrome session
+chrome_profile/
+chrome_bot_profile/
+.cronos_bot_chrome_profile/
+
+# Bot data (runtime)
+bot_data.json
+nul
 
 # Python
 __pycache__/

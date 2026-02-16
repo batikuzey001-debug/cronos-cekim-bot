@@ -2,11 +2,9 @@
 # https://docs.railway.com/reference/config-as-code
 
 [build]
-builder = "nixpacks"
-# playwright install-deps chromium Ubuntu Noble'da libasound2 hatası veriyor; apt-get ile Chromium kütüphaneleri
-buildCommand = "pip install -r requirements.txt && playwright install chromium && apt-get update && apt-get install -y libnss3 libatk-bridge2.0-0 libdrm2 libxkbcommon0 libgbm1 libasound2t64 libxshmfence1"
+builder = "dockerfile"
+dockerfilePath = "./Dockerfile"
 
 [deploy]
-startCommand = "uvicorn admin.app:app --host 0.0.0.0 --port 8000"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 10
