@@ -16,8 +16,11 @@ import json
 import os
 import sys
 import threading
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
+
+# Turkiye saat dilimi (UTC+3)
+TZ_TR = timezone(timedelta(hours=3))
 
 # Windows konsolunda Turkce karakter destegi
 if sys.platform == "win32":
@@ -52,7 +55,7 @@ def update_panel(pending=None, status_data=None, status="calisiyor", error=None,
                 data = json.load(f)
 
         data["bot_status"] = status
-        data["last_scan"] = datetime.now().isoformat()
+        data["last_scan"] = datetime.now(TZ_TR).isoformat()
         data["scan_count"] = data.get("scan_count", 0) + 1
 
         if login_user:
@@ -82,7 +85,7 @@ def update_panel(pending=None, status_data=None, status="calisiyor", error=None,
 
         if error:
             errors = data.get("errors", [])
-            errors.insert(0, {"time": datetime.now().isoformat(), "msg": str(error)})
+            errors.insert(0, {"time": datetime.now(TZ_TR).isoformat(), "msg": str(error)})
             data["errors"] = errors[:20]
 
         with open(DATA_FILE, "w", encoding="utf-8") as f:

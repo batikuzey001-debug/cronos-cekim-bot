@@ -26,6 +26,7 @@ ENV PYTHONUNBUFFERED=1
 ENV HEADLESS=1
 ENV DISPLAY=:99
 ENV CHROME_BIN=/usr/bin/chromium
+ENV TZ=Europe/Istanbul
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:${PORT:-8001}/health')" || exit 1

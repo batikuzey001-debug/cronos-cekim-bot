@@ -21,7 +21,7 @@ from pydoll.browser.chromium import Chrome
 from pydoll.browser.options import ChromiumOptions
 from pydoll.commands.runtime_commands import RuntimeCommands
 
-from config.settings import CRONOS_BASE_URL
+from config.settings import CRONOS_BASE_URL, CRONOS_USERNAME, CRONOS_PASSWORD, CRONOS_2FA_SECRET
 
 WITHDRAWALS_URL = f"{CRONOS_BASE_URL}/financial/financial-transactions"
 CHROME_PROFILE_DIR = str(Path.home() / ".cronos_bot_chrome_profile")
@@ -257,7 +257,15 @@ class CronosBrowser:
                 print("[+] localStorage ile session kurtarildi!", flush=True)
                 return True
 
-        # Hicbiri ise yaramadi, kullanicidan login iste
+        # Hicbiri ise yaramadi - headless'da otomatik login dene
+        is_headless = os.environ.get("HEADLESS", "").lower() in ("1", "true") or \
+                      os.environ.get("RAILWAY_ENVIRONMENT") is not None
+        if is_headless:
+            print("[*] Headless mod - otomatik login deneniyor...", flush=True)
+            ok = await self.auto_login()
+            if ok:
+                return True
+
         print("[*] Otomatik session kurtarilamadi.", flush=True)
         return False
 
@@ -274,8 +282,200 @@ class CronosBrowser:
             return True
         return False
 
+    async def auto_login(self):
+        """
+        Otomatik login: username + password gir, submit et.
+        2FA varsa TOTP koduyla gir.
+        Headless modda (Railway) kullanilir.
+        """
+        if not CRONOS_USERNAME or not CRONOS_PASSWORD:
+            print("[!] CRONOS_USERNAME/PASSWORD env degiskenleri ayarlanmamis!", flush=True)
+            return False
+
+        print(f"[*] Otomatik login deneniyor ({CRONOS_USERNAME})...", flush=True)
+
+        # Login sayfasina git
+        await self._tab.go_to(f"{CRONOS_BASE_URL}/login")
+        await asyncio.sleep(5)
+
+        # Cloudflare challenge varsa bekle
+        for _ in range(15):
+            title = await self._js("return document.title") or ""
+            if "just a moment" in title.lower() or "checking" in title.lower():
+                await asyncio.sleep(2)
+            else:
+                break
+
+        # Username ve password inputlarini bul ve doldur
+        login_result = await self._js_json("""
+            var inputs = document.querySelectorAll('input');
+            var userInput = null, passInput = null;
+            for (var i = 0; i < inputs.length; i++) {
+                var t = (inputs[i].type || '').toLowerCase();
+                var n = (inputs[i].name || '').toLowerCase();
+                var p = (inputs[i].placeholder || '').toLowerCase();
+                if (t === 'email' || n === 'email' || p.includes('mail') || p.includes('kullan')) {
+                    userInput = inputs[i];
+                } else if (t === 'password' || n === 'password') {
+                    passInput = inputs[i];
+                }
+            }
+            if (!userInput || !passInput) return {error: 'inputs_not_found', count: inputs.length};
+
+            // Vue reactive input icin: native setter + input event
+            var nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                window.HTMLInputElement.prototype, 'value'
+            ).set;
+
+            nativeInputValueSetter.call(userInput, '""" + CRONOS_USERNAME.replace("'", "\\'") + """');
+            userInput.dispatchEvent(new Event('input', {bubbles: true}));
+            userInput.dispatchEvent(new Event('change', {bubbles: true}));
+
+            nativeInputValueSetter.call(passInput, '""" + CRONOS_PASSWORD.replace("'", "\\'") + """');
+            passInput.dispatchEvent(new Event('input', {bubbles: true}));
+            passInput.dispatchEvent(new Event('change', {bubbles: true}));
+
+            return {ok: true, user: userInput.value.substring(0, 3) + '***'};
+        """)
+
+        if not login_result or login_result.get("error"):
+            print(f"[!] Login inputlari bulunamadi: {login_result}", flush=True)
+            return False
+
+        print(f"[+] Login formu dolduruldu: {login_result.get('user', '?')}", flush=True)
+        await asyncio.sleep(0.5)
+
+        # Submit butonuna tikla
+        await self._js("""
+            var btns = document.querySelectorAll('button');
+            for (var i = 0; i < btns.length; i++) {
+                var t = btns[i].textContent.trim().toLowerCase();
+                if (t.includes('gir') || t.includes('login') || t.includes('sign') || btns[i].type === 'submit') {
+                    btns[i].click();
+                    break;
+                }
+            }
+        """)
+
+        print("[*] Login butonu tiklandi, yanit bekleniyor...", flush=True)
+        await asyncio.sleep(5)
+
+        # 2FA sayfasi geldi mi kontrol et
+        for attempt in range(10):
+            title = await self._js("return document.title") or ""
+            url = await self._js("return window.location.href") or ""
+            page_text = await self._js("return document.body ? document.body.innerText.substring(0, 500) : ''") or ""
+
+            # 2FA / OTP sayfasi
+            if "2fa" in url.lower() or "otp" in url.lower() or "dogrulama" in page_text.lower() or "authenticator" in page_text.lower():
+                print("[*] 2FA sayfasi algilandi...", flush=True)
+                ok = await self._handle_2fa()
+                if ok:
+                    await asyncio.sleep(3)
+                    break
+                else:
+                    print("[!] 2FA basarisiz!", flush=True)
+                    return False
+
+            # Login basarili - panel sayfasindayiz
+            if not self._is_login_page(title, url):
+                if "just a moment" not in title.lower() and "checking" not in title.lower():
+                    print(f"[+] Login basarili! Title: {title}", flush=True)
+                    await self.save_session()
+                    return True
+
+            await asyncio.sleep(2)
+
+        # Son kontrol
+        title = await self._js("return document.title") or ""
+        url = await self._js("return window.location.href") or ""
+        if not self._is_login_page(title, url):
+            print(f"[+] Login basarili! Title: {title}", flush=True)
+            await self.save_session()
+            return True
+
+        print("[!] Login basarisiz - hala login sayfasinda!", flush=True)
+        return False
+
+    async def _handle_2fa(self):
+        """TOTP 2FA kodunu gir."""
+        if not CRONOS_2FA_SECRET:
+            print("[!] CRONOS_2FA_SECRET ayarlanmamis! 2FA gecilemez.", flush=True)
+            return False
+
+        try:
+            import pyotp
+            totp = pyotp.TOTP(CRONOS_2FA_SECRET)
+            code = totp.now()
+            print(f"[*] 2FA kodu uretildi: {code[:2]}****", flush=True)
+        except ImportError:
+            print("[!] pyotp yuklu degil! pip install pyotp", flush=True)
+            return False
+        except Exception as e:
+            print(f"[!] TOTP hatasi: {e}", flush=True)
+            return False
+
+        # OTP inputunu bul ve doldur
+        result = await self._js_json("""
+            var inputs = document.querySelectorAll('input');
+            var otpInput = null;
+            for (var i = 0; i < inputs.length; i++) {
+                var t = (inputs[i].type || '').toLowerCase();
+                var n = (inputs[i].name || '').toLowerCase();
+                if (t === 'text' || t === 'number' || t === 'tel' || n.includes('otp') || n.includes('code') || n.includes('token')) {
+                    otpInput = inputs[i];
+                    break;
+                }
+            }
+            if (!otpInput) return {error: 'otp_input_not_found'};
+
+            var nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                window.HTMLInputElement.prototype, 'value'
+            ).set;
+            nativeInputValueSetter.call(otpInput, '""" + code + """');
+            otpInput.dispatchEvent(new Event('input', {bubbles: true}));
+            otpInput.dispatchEvent(new Event('change', {bubbles: true}));
+            return {ok: true};
+        """)
+
+        if not result or result.get("error"):
+            print(f"[!] OTP input bulunamadi: {result}", flush=True)
+            return False
+
+        await asyncio.sleep(0.5)
+
+        # Submit
+        await self._js("""
+            var btns = document.querySelectorAll('button');
+            for (var i = 0; i < btns.length; i++) {
+                var t = btns[i].textContent.trim().toLowerCase();
+                if (t.includes('dogrula') || t.includes('onayla') || t.includes('verify') || t.includes('gir') || btns[i].type === 'submit') {
+                    btns[i].click();
+                    break;
+                }
+            }
+        """)
+
+        print("[*] 2FA kodu gonderildi...", flush=True)
+        await asyncio.sleep(3)
+        return True
+
     async def wait_for_login(self, max_wait=600):
-        """Manuel login bekleme."""
+        """
+        Login bekleme. Headless modda otomatik login dener.
+        Headed modda (lokal) kullanicidan bekler.
+        """
+        # Headless modda otomatik login dene
+        is_headless = os.environ.get("HEADLESS", "").lower() in ("1", "true") or \
+                      os.environ.get("RAILWAY_ENVIRONMENT") is not None
+        if is_headless:
+            print("[*] Headless mod - otomatik login deneniyor...", flush=True)
+            ok = await self.auto_login()
+            if ok:
+                return True
+            print("[!] Otomatik login basarisiz!", flush=True)
+            return False
+
         print("[*] Login bekleniyor...", flush=True)
         print("[*] Bot'un actigi Chrome penceresinden giris yapin!", flush=True)
 
